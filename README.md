@@ -14,9 +14,12 @@ pip install -r requirements.txt
 python -c "import torch; import transformers; import datasets; import yaml; print('all imports ok')"
 ```
 
+
 3.修改 torch 至当前 GPU 配套 CUDA 版本
 
+
 4.（可选）修改 configs/default.yaml 训练数据集相关配置
+
 
 5.运行
 ```sh
