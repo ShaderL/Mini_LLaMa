@@ -2,8 +2,10 @@ import os
 import random
 
 import torch
-import torch.nn as nn
+import yaml
+from torch import nn
 from torch.utils.data import Dataset, DataLoader
+
 from datasets import load_dataset
 from transformers import GPT2TokenizerFast
 from tqdm import tqdm
@@ -12,67 +14,34 @@ from model_miniLLaMa import ModelConfig, MiniLLaMA
 
 
 class TokenBlockDataset(Dataset):
-    def __init__(
-        self,
-        dataset,
-        tokenizer,
-        block_size,
-        text_column="text",
-    ):
+    def __init__(self, texts, tokenizer, block_size):
         self.samples = []
 
-        for item in tqdm(dataset, desc="Tokenizing"):
-            text = item[text_column]
-
-            if not text or not text.strip():
+        for text in tqdm(texts, desc="Tokenizing"):
+            if not isinstance(text, str) or not text.strip():
                 continue
 
-            token_ids = tokenizer.encode(
-                text,
-                add_special_tokens=False,
-            )
+            token_ids = tokenizer.encode(text)
 
-            # 一个完整训练样本至少需要 block_size + 1 个 token
-            if len(token_ids) < block_size + 1:
-                continue
-
-            # 按 block_size + 1 切分
-            for start in range(
-                0,
-                len(token_ids) - block_size,
-                block_size,
-            ):
-                chunk = token_ids[start:start + block_size + 1]
+            for i in range(0, len(token_ids) - block_size, block_size):
+                chunk = token_ids[i:i + block_size + 1]
 
                 if len(chunk) < block_size + 1:
                     continue
 
-                x = torch.tensor(
-                    chunk[:-1],
-                    dtype=torch.long,
-                )
-
-                y = torch.tensor(
-                    chunk[1:],
-                    dtype=torch.long,
-                )
+                x = torch.tensor(chunk[:-1], dtype=torch.long)
+                y = torch.tensor(chunk[1:], dtype=torch.long)
 
                 self.samples.append((x, y))
-
-        print(f"Created {len(self.samples)} training samples.")
 
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        return self.samples[idx]
+    def __getitem__(self, index):
+        return self.samples[index]
 
 
 def set_seed(seed):
-    """
-    保证 random / torch 的随机实验尽可能可复现。
-    """
-
     random.seed(seed)
     torch.manual_seed(seed)
 
@@ -80,96 +49,91 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def load_training_dataset(config):
-    """
-    根据 config 加载数据集。
+def load_single_dataset(dataset_config):
+    name = dataset_config["name"]
+    source = dataset_config["source"]
 
-    当前第一版支持：
-        - Hugging Face datasets
-        - TinyStories
-    """
+    source_type = source.get("type", "huggingface")
 
-    dataset_config = config["dataset"]
-
-    dataset_name = dataset_config["name"]
-    split = dataset_config.get("split", "train")
-    text_column = dataset_config.get("text_column", "text")
-
-    if dataset_name == "tinystories":
-        hf_name = "roneneldan/TinyStories"
-    else:
+    if source_type != "huggingface":
         raise ValueError(
-            f"Unsupported dataset: {dataset_name}"
+            f"Unsupported dataset source type: {source_type}"
         )
 
-    print(f"Loading dataset: {hf_name}")
-    print(f"Split: {split}")
+    path = source["path"]
+    split = source.get("split", "train")
+    text_column = source.get("text_column", "text")
+    config_name = source.get("config_name")
 
-    dataset = load_dataset(
-        hf_name,
-        split=split,
-    )
+    print(f"\nLoading dataset: {name}")
+    print(f"  source: {path}")
+    print(f"  split: {split}")
+    print(f"  text column: {text_column}")
+
+    if config_name:
+        print(f"  config: {config_name}")
+        dataset = load_dataset(
+            path,
+            name=config_name,
+            split=split,
+        )
+    else:
+        dataset = load_dataset(
+            path,
+            split=split,
+        )
+
+    if text_column not in dataset.column_names:
+        raise ValueError(
+            f"Text column '{text_column}' not found in dataset '{name}'. "
+            f"Available columns: {dataset.column_names}"
+        )
+
+    max_documents = dataset_config.get("max_documents")
+
+    if max_documents is not None:
+        max_documents = min(max_documents, len(dataset))
+
+        if max_documents < len(dataset):
+            seed = dataset_config.get("seed", 42)
+
+            dataset = dataset.shuffle(seed=seed)
+            dataset = dataset.select(range(max_documents))
+
+    texts = dataset[text_column]
+
+    valid_texts = [
+        text
+        for text in texts
+        if isinstance(text, str) and text.strip()
+    ]
+
+    print(f"  documents loaded: {len(valid_texts)}")
+
+    return valid_texts
 
 
-    sampling_config = dataset_config.get(
-        "sampling",
-        {},
-    )
+def load_training_texts(config):
+    datasets_config = config.get("datasets")
 
-    strategy = sampling_config.get(
-        "strategy",
-        "first",
-    )
+    if not datasets_config:
+        raise ValueError(
+            "No datasets configured. Please add at least one dataset "
+            "under 'datasets' in the YAML config."
+        )
 
-    max_stories = sampling_config.get(
-        "max_stories",
-        None,
-    )
+    all_texts = []
 
-    seed = sampling_config.get(
-        "seed",
-        42,
-    )
+    for dataset_config in datasets_config:
+        texts = load_single_dataset(dataset_config)
+        all_texts.extend(texts)
 
-    if max_stories is not None and max_stories < len(dataset):
+    print(f"\nTotal documents: {len(all_texts)}")
 
-        if strategy == "first":
-            print(
-                f"Using first {max_stories} stories."
-            )
-
-            dataset = dataset.select(
-                range(max_stories)
-            )
-
-        elif strategy == "random":
-            print(
-                f"Randomly selecting "
-                f"{max_stories} stories "
-                f"(seed={seed})."
-            )
-
-            dataset = dataset.shuffle(
-                seed=seed
-            ).select(
-                range(max_stories)
-            )
-
-        else:
-            raise ValueError(
-                f"Unknown sampling strategy: {strategy}"
-            )
-
-    print(f"Stories used: {len(dataset)}")
-
-    return dataset, text_column
+    return all_texts
 
 
 def build_model(config, vocab_size):
-    """
-    根据 config 创建 MiniLLaMA。
-    """
-
     model_config = ModelConfig(
         vocab_size=vocab_size,
         block_size=config["model"]["block_size"],
@@ -177,10 +141,7 @@ def build_model(config, vocab_size):
         d_model=config["model"]["d_model"],
         d_ffn=config["model"]["d_ffn"],
         num_heads=config["model"]["num_heads"],
-        rms_norm_eps=config["model"].get(
-            "rms_norm_eps",
-            1e-6,
-        ),
+        rms_norm_eps=config["model"]["rms_norm_eps"],
     )
 
     model = MiniLLaMA(model_config)
@@ -190,39 +151,20 @@ def build_model(config, vocab_size):
 
 def save_checkpoint(
     model,
+    optimizer,
     model_config,
     training_config,
-    optimizer,
     epoch,
     loss,
-    path,
+    checkpoint_path,
 ):
-    """
-    保存训练 checkpoint。
+    checkpoint_dir = os.path.dirname(checkpoint_path)
 
-    保存：
-        - 模型参数
-        - 模型结构配置
-        - 训练配置
-        - optimizer 状态
-        - 当前 epoch
-        - 当前 loss
-
-    这样 generate.py 可以仅凭 checkpoint
-    重建模型。
-    """
-
-    directory = os.path.dirname(path)
-
-    if directory:
-        os.makedirs(
-            directory,
-            exist_ok=True,
-        )
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     checkpoint = {
         "model_state_dict": model.state_dict(),
-
         "model_config": {
             "vocab_size": model_config.vocab_size,
             "block_size": model_config.block_size,
@@ -232,303 +174,177 @@ def save_checkpoint(
             "num_heads": model_config.num_heads,
             "rms_norm_eps": model_config.rms_norm_eps,
         },
-
         "training_config": training_config,
-
         "optimizer_state_dict": optimizer.state_dict(),
-
         "epoch": epoch,
-
         "loss": loss,
     }
 
-    torch.save(
-        checkpoint,
-        path,
-    )
+    torch.save(checkpoint, checkpoint_path)
 
-    print(f"Checkpoint saved to: {path}")
+    print(f"Checkpoint saved to: {checkpoint_path}")
 
 
 def train(config):
-    """
-    完整训练流程。
+    runtime_config = config["runtime"]
+    training_config = config["training"]
 
-    config:
-        从 YAML 读取的 Python dict。
-    """
-
-    runtime_config = config.get(
-        "runtime",
-        {},
-    )
-
-    seed = runtime_config.get(
-        "seed",
-        42,
-    )
-
+    seed = runtime_config.get("seed", 42)
     set_seed(seed)
 
     device = runtime_config.get("device", "auto")
-    
+
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    device = torch.device(device)
 
-    print("=" * 60)
-    print("MiniLLaMA Training")
-    print("=" * 60)
+    device = torch.device(device)
 
     print(f"Device: {device}")
     print(f"Seed: {seed}")
 
-    tokenizer_name = config.get(
-        "tokenizer",
-        "gpt2",
-    )
+    tokenizer_name = config.get("tokenizer", "gpt2")
+
+    tokenizer = GPT2TokenizerFast.from_pretrained(tokenizer_name)
 
     print(f"Tokenizer: {tokenizer_name}")
+    print(f"Vocabulary size: {len(tokenizer)}")
 
-    tokenizer = GPT2TokenizerFast.from_pretrained(
-        tokenizer_name
-    )
+    texts = load_training_texts(config)
 
-    # GPT-2 没有 pad token
-    # 当前训练不需要 padding，因此这里只记录 vocab size。
-    vocab_size = tokenizer.vocab_size
-
-    print(f"Vocabulary size: {vocab_size}")
-
-    dataset, text_column = load_training_dataset(
-        config
-    )
-
-    block_size = config["model"]["block_size"]
-
-    train_dataset = TokenBlockDataset(
-        dataset=dataset,
+    dataset = TokenBlockDataset(
+        texts=texts,
         tokenizer=tokenizer,
-        block_size=block_size,
-        text_column=text_column,
+        block_size=config["model"]["block_size"],
     )
 
-    if len(train_dataset) == 0:
-        raise RuntimeError(
-            "No training samples were created. "
-            "Try increasing max_stories or "
-            "checking block_size."
+    print(f"\nTraining samples created: {len(dataset)}")
+
+    max_train_samples = training_config.get("max_train_samples")
+
+    if max_train_samples is not None:
+        max_train_samples = min(
+            max_train_samples,
+            len(dataset),
         )
 
-    max_train_samples = config["dataset"] \
-        .get("sampling", {}) \
-        .get("max_train_samples", None)
+        if max_train_samples < len(dataset):
+            seed = runtime_config.get("seed", 42)
 
-    if (
-        max_train_samples is not None
-        and max_train_samples < len(train_dataset)
-    ):
-        print(
-            f"Limiting training samples "
-            f"to {max_train_samples}."
-        )
+            generator = torch.Generator()
+            generator.manual_seed(seed)
 
-        train_dataset = torch.utils.data.Subset(
-            train_dataset,
-            range(max_train_samples),
-        )
+            indices = torch.randperm(
+                len(dataset),
+                generator=generator,
+            )[:max_train_samples]
 
-    print(
-        f"Final training samples: "
-        f"{len(train_dataset)}"
-    )
+            dataset.samples = [
+                dataset.samples[i]
+                for i in indices.tolist()
+            ]
 
-    training_config = config["training"]
+            print(
+                f"Training samples limited to: "
+                f"{len(dataset)}"
+            )
 
-    batch_size = training_config.get(
-        "batch_size",
-        4,
-    )
-
-    num_workers = training_config.get(
-        "num_workers",
-        0,
-    )
+    batch_size = training_config["batch_size"]
 
     dataloader = DataLoader(
-        train_dataset,
+        dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=(device.type == "cuda"),
+        num_workers=training_config.get("num_workers", 0),
     )
 
-    print(
-        f"Batch size: {batch_size}"
-    )
-
-    print(
-        f"Number of batches: {len(dataloader)}"
-    )
+    print(f"Batch size: {batch_size}")
+    print(f"Batches per epoch: {len(dataloader)}")
 
     model, model_config = build_model(
-        config,
-        vocab_size,
+        config=config,
+        vocab_size=len(tokenizer),
     )
 
-    model = model.to(device)
+    model.to(device)
 
-    num_parameters = sum(
-        p.numel()
-        for p in model.parameters()
+    num_params = sum(
+        parameter.numel()
+        for parameter in model.parameters()
     )
 
-    print(
-        f"Model parameters: "
-        f"{num_parameters:,}"
-    )
+    print(f"Model parameters: {num_params:,}")
 
     criterion = nn.CrossEntropyLoss()
 
-    learning_rate = training_config.get(
-        "learning_rate",
-        3e-4,
-    )
-
-    weight_decay = training_config.get(
-        "weight_decay",
-        0.0,
-    )
-
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=learning_rate,
-        weight_decay=weight_decay,
+        lr=training_config["learning_rate"],
+        weight_decay=training_config.get("weight_decay", 0.0),
     )
 
-    num_epochs = training_config.get(
-        "num_epochs",
-        1,
-    )
+    num_epochs = training_config["num_epochs"]
+    log_interval = training_config.get("log_interval", 100)
 
-    log_interval = training_config.get(
-        "log_interval",
-        100,
-    )
-
-    output_config = config.get(
-        "output",
-        {},
-    )
-
-    checkpoint_path = output_config.get(
-        "checkpoint",
-        "checkpoints/mini_llama.pth",
-    )
-
-    model.train()
-
-    for epoch in range(num_epochs):
-
-        print()
-        print(
-            f"===== Epoch "
-            f"{epoch + 1}/{num_epochs} ====="
-        )
+    for epoch in range(1, num_epochs + 1):
+        model.train()
 
         total_loss = 0.0
 
         progress_bar = tqdm(
             dataloader,
-            desc=f"Epoch {epoch + 1}",
+            desc=f"Epoch {epoch}/{num_epochs}",
         )
 
-        for step, (x, y) in enumerate(
-            progress_bar
-        ):
+        for step, (x, y) in enumerate(progress_bar, start=1):
+            x = x.to(device)
+            y = y.to(device)
 
-            x = x.to(
-                device,
-                non_blocking=True,
-            )
-
-            y = y.to(
-                device,
-                non_blocking=True,
-            )
+            optimizer.zero_grad()
 
             logits = model(x)
 
             loss = criterion(
-                logits.reshape(
-                    -1,
-                    logits.size(-1),
-                ),
+                logits.reshape(-1, logits.size(-1)),
                 y.reshape(-1),
             )
 
-            optimizer.zero_grad()
-
             loss.backward()
-
             optimizer.step()
 
-            loss_value = loss.item()
-
-            total_loss += loss_value
+            total_loss += loss.item()
 
             progress_bar.set_postfix(
-                loss=f"{loss_value:.4f}"
+                loss=f"{loss.item():.4f}"
             )
 
-            if (
-                log_interval > 0
-                and (step + 1) % log_interval == 0
-            ):
-                avg_loss = (
-                    total_loss / (step + 1)
-                )
-
+            if step % log_interval == 0:
                 print(
-                    f"Step "
-                    f"{step + 1}/{len(dataloader)} "
-                    f"| "
-                    f"Loss: {loss_value:.4f} "
-                    f"| "
-                    f"Avg Loss: {avg_loss:.4f}"
+                    f"Epoch {epoch}, "
+                    f"step {step}/{len(dataloader)}, "
+                    f"loss {loss.item():.4f}"
                 )
 
-        average_loss = (
-            total_loss / len(dataloader)
-        )
+        avg_loss = total_loss / len(dataloader)
 
-        print()
         print(
-            f"Epoch {epoch + 1} finished "
-            f"| Average Loss: "
-            f"{average_loss:.4f}"
+            f"\nEpoch {epoch} finished. "
+            f"Average loss: {avg_loss:.4f}"
         )
 
         save_checkpoint(
             model=model,
+            optimizer=optimizer,
             model_config=model_config,
             training_config=config,
-            optimizer=optimizer,
-            epoch=epoch + 1,
-            loss=average_loss,
-            path=checkpoint_path,
+            epoch=epoch,
+            loss=avg_loss,
+            checkpoint_path=config["output"]["checkpoint"],
         )
 
-    print()
-    print("=" * 60)
-    print("Training finished.")
-    print("=" * 60)
-
-    return model
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "Please run training through cli.py."
-    )
+    with open("configs/default.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    train(config)
 
