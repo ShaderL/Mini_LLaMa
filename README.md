@@ -16,7 +16,9 @@ python -c "import torch; import transformers; import datasets; import yaml; prin
 
 3.修改 torch 至当前 GPU 配套 CUDA 版本
 
-4.运行
+4.（可选）修改 configs/default.yaml 训练数据集相关配置
+
+5.运行
 ```sh
 python cli.py --help
 python cli.py train --help
