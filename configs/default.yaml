@@ -5,8 +5,33 @@ datasets:
       path: roneneldan/TinyStories
       split: train
       text_column: text
+    max_documents: 10000
 
-    max_documents: 100
+  - name: wikitext103
+    source:
+      type: huggingface
+      path: Salesforce/wikitext
+      config_name: wikitext-103-raw-v1
+      split: train
+      text_column: text
+    max_documents: 10000
+
+  - name: openwebtext
+    source:
+      type: huggingface
+      path: Skylion007/openwebtext
+      split: train
+      text_column: text
+    max_documents: 10000
+
+  - name: fineweb
+    source:
+      type: huggingface
+      path: HuggingFaceFW/fineweb
+      config_name: sample-10BT
+      split: train
+      text_column: text
+    max_documents: 10000
 
 tokenizer: gpt2
 
