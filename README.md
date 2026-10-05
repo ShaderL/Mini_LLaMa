@@ -20,3 +20,5 @@ python cli.py --help
 python cli.py train --help
 python cli.py generate --help
 ```
+
+4.修改 torch 至当前 GPU 配套 CUDA 版本
