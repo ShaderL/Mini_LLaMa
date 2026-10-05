@@ -9,6 +9,7 @@ python -m venv .venv
 .\.venv\Scripts\activate
 ```
 ```sh
+Linux
 python -m venv .venv
 source .venv/bin/activate
 ```
