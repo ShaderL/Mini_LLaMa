@@ -14,6 +14,10 @@ pip install -r requirements.txt
 python -c "import torch; import transformers; import datasets; import yaml; print('all imports ok')"
 ```
 
+3.修改 huggingface Cache 路径！！！
+```sh
+export HF_HOME=/data/xiangyouLiu/huggingface_cache
+```
 
 3.修改 torch 至当前 GPU 配套 CUDA 版本
 
