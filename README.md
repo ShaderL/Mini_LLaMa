@@ -4,8 +4,13 @@
 # Steps
 1.创建新虚拟环境
 ```sh
+Windows
 python -m venv .venv
 .\.venv\Scripts\activate
+```
+```sh
+python -m venv .venv
+source .venv/bin/activate
 ```
 
 2.安装依赖
