@@ -25,7 +25,11 @@ python -c "import torch; import transformers; import datasets; import yaml; prin
 export HF_HOME=/data/xiangyouLiu/huggingface_cache
 ```
 
-3.修改 torch 至当前 GPU 配套 CUDA 版本
+3.下载符合当前 GPU 配套 CUDA 版本的 torch
+```sh
+pip install torch torchvision torchaudio \
+--index-url https://download.pytorch.org/whl/cu128
+```
 
 
 4.（可选）修改 configs/default.yaml 训练数据集相关配置
