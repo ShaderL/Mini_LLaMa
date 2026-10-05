@@ -35,6 +35,11 @@ pip install torch torchvision torchaudio \
 4.（可选）修改 configs/default.yaml 训练数据集相关配置
 
 
+5.（可选）配置 Huggingface 镜像源
+```sh
+export HF_ENDPOINT=https://hf-mirror.com
+```
+
 5.运行
 ```sh
 python cli.py --help
