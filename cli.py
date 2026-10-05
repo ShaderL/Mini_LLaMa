@@ -1,7 +1,7 @@
 import argparse
 
-import yaml
 import torch
+import yaml
 
 from train import train
 from generate import generate_from_checkpoint
@@ -12,20 +12,8 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
-def set_nested_value(config, path, value):
-    current = config
-
-    for key in path[:-1]:
-        current = current.setdefault(key, {})
-
-    current[path[-1]] = value
-
-
 def train_command(args):
     config = load_config(args.config)
-
-    if args.dataset is not None:
-        config["dataset"]["name"] = args.dataset
 
     if args.batch_size is not None:
         config["training"]["batch_size"] = args.batch_size
@@ -36,13 +24,8 @@ def train_command(args):
     if args.num_epochs is not None:
         config["training"]["num_epochs"] = args.num_epochs
 
-    if args.max_stories is not None:
-        config["dataset"]["sampling"]["max_stories"] = args.max_stories
-
     if args.max_train_samples is not None:
-        config["dataset"]["sampling"]["max_train_samples"] = (
-            args.max_train_samples
-        )
+        config["training"]["max_train_samples"] = args.max_train_samples
 
     if args.device is not None:
         config["runtime"]["device"] = args.device
@@ -59,25 +42,25 @@ def generate_command(args):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    text = generate_from_checkpoint(
+    output = generate_from_checkpoint(
         checkpoint_path=args.checkpoint,
         prompt=args.prompt,
-        device=device,
         max_new_tokens=args.max_new_tokens,
-        do_sample=args.do_sample,
         temperature=args.temperature,
         top_k=args.top_k,
         top_p=args.top_p,
+        do_sample=args.do_sample,
         tokenizer_name=args.tokenizer,
+        device=device,
     )
 
-    print()
-    print(text)
+    print("\nGenerated text:")
+    print(output)
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="MiniLLaMA command line interface"
+        description="MiniLLaMA training and generation CLI"
     )
 
     subparsers = parser.add_subparsers(
@@ -94,21 +77,14 @@ def build_parser():
         "--config",
         type=str,
         default="configs/default.yaml",
-        help="Path to training config",
-    )
-
-    train_parser.add_argument(
-        "--dataset",
-        type=str,
-        default=None,
-        help="Override dataset name",
+        help="Path to YAML config file",
     )
 
     train_parser.add_argument(
         "--batch-size",
         type=int,
         default=None,
-        help="Override batch size",
+        help="Override training batch size",
     )
 
     train_parser.add_argument(
@@ -122,14 +98,7 @@ def build_parser():
         "--num-epochs",
         type=int,
         default=None,
-        help="Override number of epochs",
-    )
-
-    train_parser.add_argument(
-        "--max-stories",
-        type=int,
-        default=None,
-        help="Override maximum number of stories",
+        help="Override number of training epochs",
     )
 
     train_parser.add_argument(
@@ -143,7 +112,7 @@ def build_parser():
         "--device",
         type=str,
         default=None,
-        help="Override device, e.g. cuda or cpu",
+        help="Override device, e.g. cpu or cuda",
     )
 
     train_parser.add_argument(
@@ -153,13 +122,11 @@ def build_parser():
         help="Override random seed",
     )
 
-    train_parser.set_defaults(
-        func=train_command
-    )
+    train_parser.set_defaults(func=train_command)
 
     generate_parser = subparsers.add_parser(
         "generate",
-        help="Generate text",
+        help="Generate text from a checkpoint",
     )
 
     generate_parser.add_argument(
@@ -173,7 +140,7 @@ def build_parser():
         "--prompt",
         type=str,
         default="Once upon a time",
-        help="Prompt text",
+        help="Generation prompt",
     )
 
     generate_parser.add_argument(
@@ -215,7 +182,7 @@ def build_parser():
         "--device",
         type=str,
         default=None,
-        help="Device, e.g. cuda or cpu",
+        help="Device, e.g. cpu or cuda",
     )
 
     generate_parser.add_argument(
@@ -225,9 +192,7 @@ def build_parser():
         help="Enable or disable sampling",
     )
 
-    generate_parser.set_defaults(
-        func=generate_command
-    )
+    generate_parser.set_defaults(func=generate_command)
 
     return parser
 
@@ -235,6 +200,7 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
     args.func(args)
 
 
