@@ -270,11 +270,11 @@ def train(config):
 
     set_seed(seed)
 
-    device = runtime_config.get(
-        "device",
-        "cuda" if torch.cuda.is_available() else "cpu",
-    )
-
+    device = runtime_config.get("device", "auto")
+    
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    
     device = torch.device(device)
 
     print("=" * 60)
