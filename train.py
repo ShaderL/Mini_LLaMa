@@ -17,23 +17,50 @@ class TokenBlockDataset(Dataset):
     def __init__(self, texts, tokenizer, block_size):
         self.samples = []
 
+        eos_token_id = tokenizer.eos_token_id
+
+        token_stream = []
+
         for text in tqdm(texts, desc="Tokenizing"):
             if not isinstance(text, str) or not text.strip():
                 continue
 
             token_ids = tokenizer.encode(text)
 
-            for i in range(0, len(token_ids) - block_size, block_size):
-                chunk = token_ids[i:i + block_size + 1]
+            if not token_ids:
+                continue
 
-                if len(chunk) < block_size + 1:
-                    continue
+            token_stream.extend(token_ids)
 
-                x = torch.tensor(chunk[:-1], dtype=torch.long)
-                y = torch.tensor(chunk[1:], dtype=torch.long)
+            if eos_token_id is not None:
+                token_stream.append(eos_token_id)
 
-                self.samples.append((x, y))
+        total_tokens = len(token_stream)
 
+        print(f"Total training tokens: {total_tokens:,}")
+
+        for i in range(
+            0,
+            total_tokens - block_size,
+            block_size,
+        ):
+            chunk = token_stream[i:i + block_size + 1]
+
+            if len(chunk) < block_size + 1:
+                continue
+
+            x = torch.tensor(
+                chunk[:-1],
+                dtype=torch.long,
+            )
+
+            y = torch.tensor(
+                chunk[1:],
+                dtype=torch.long,
+            )
+
+            self.samples.append((x, y))
+            
     def __len__(self):
         return len(self.samples)
 
